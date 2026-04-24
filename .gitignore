@@ -1,0 +1,7 @@
+# docs와 POC 폴더만 추적
+*
+!.gitignore
+!docs/
+!docs/**
+!POC/
+!POC/**
