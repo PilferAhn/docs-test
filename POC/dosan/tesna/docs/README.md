@@ -9,11 +9,12 @@
 | # | 파일 | 내용 |
 |---|------|------|
 | 01 | [databricks-s3-volume.md](./01_databricks-s3-volume.md) | S3 → Databricks Volume 연동, IAM Role 권한 |
-| 02 | [aws-scp-ram.md](./02_aws-scp-ram.md) | SCP(서비스 제어 정책), RAM(리소스 공유) |
+| 02 | [aws-scp-ram.md](./02_aws-scp-ram.md) | SCP(서비스 제어 정책), RAM(리소스 공유), Cross Account Role |
 | 03 | [aws-networking.md](./03_aws-networking.md) | VPC, Gateway, Security Group, NACL, 포트 설정 |
 | 04 | [terraform.md](./04_terraform.md) | Terraform 개념 및 POC 활용 |
 | 05 | [deploy-prefix.md](./05_deploy-prefix.md) | 리소스 네이밍 및 Prefix 전략 |
 | 06 | [databricks-vpc-setup.md](./06_databricks-vpc-setup.md) | Databricks Managed vs Customer Managed VPC |
+| 07 | [unity-catalog.md](./07_unity-catalog.md) | UC Bucket, Root Role, UC Root, External Location |
 
 ---
 
