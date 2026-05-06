@@ -219,6 +219,77 @@ Outbound Rules:
 
 ---
 
+## Security Group Self 규칙
+
+### 개념
+
+Source를 특정 IP가 아닌 **"이 Security Group 자체"** 로 지정하는 것.
+같은 SG가 붙은 리소스끼리만 통신 허용.
+
+```
+일반 규칙:
+  Inbound  Port 443  Source: 10.0.1.5/32     ← 특정 IP에서 오는 것만 허용
+
+Self 규칙:
+  Inbound  Port ALL  Source: sg-0a1b2c3d      ← 이 SG가 붙은 것끼리만 허용
+                             (= 자기 자신 SG)
+```
+
+### 쉽게 비유하면
+
+```
+같은 회사 사원증을 가진 사람끼리만 통신 허용
+
+Security Group = 사원증 종류
+Self           = "같은 사원증을 가진 사람은 서로 자유롭게 통신 가능"
+
+→ 사원증 없는 외부인은 접근 불가
+→ 다른 종류 사원증도 접근 불가
+→ 같은 SG(사원증)를 가진 EC2끼리만 허용
+```
+
+### Databricks에서 Self를 쓰는 이유
+
+Databricks 클러스터는 **여러 노드(EC2)로 구성**됨.
+노드들끼리 데이터를 주고받는 내부 통신을 Self로 허용.
+
+```
+클러스터 구성:
+  Driver 노드  (EC2) ─── SG: databricks-cluster-sg
+  Worker 노드1 (EC2) ─── SG: databricks-cluster-sg
+  Worker 노드2 (EC2) ─── SG: databricks-cluster-sg
+
+Self 규칙 적용 시:
+  Driver ↔ Worker1 ↔ Worker2 모두 자유롭게 통신 가능
+  (같은 SG를 달고 있으므로)
+
+외부에서는 접근 불가 (SG가 다르므로)
+```
+
+### 실제 Security Group 규칙 예시 (Databricks)
+
+```
+Inbound Rules:
+  Port  ALL        TCP/UDP   sg-0a1b2c3d (Self)          ← 클러스터 노드 간 통신
+  Port  6666       TCP       Databricks Control Plane IP  ← Control Plane 명령 수신
+
+Outbound Rules:
+  Port  ALL        TCP/UDP   sg-0a1b2c3d (Self)          ← 클러스터 노드 간 통신
+  Port  443        TCP       0.0.0.0/0                    ← HTTPS
+  Port  8443~8451  TCP       Databricks Control Plane IP  ← SCC 터널
+```
+
+### Self가 없으면?
+
+```
+Worker 노드가 Driver에게 처리 결과를 보내려 해도
+→ Inbound Self 규칙 없음 → 차단
+→ Spark job 실행 불가
+→ 클러스터는 켜졌는데 작업이 안 됨
+```
+
+---
+
 ## Security Group vs NACL
 
 | 항목 | Security Group | NACL |
