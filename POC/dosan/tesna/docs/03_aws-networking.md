@@ -47,10 +47,36 @@
 
 ### Inbound / Outbound
 
-| 구분 | 방향 | 예시 |
-|------|------|------|
-| Inbound | 외부 → 내부 | 사용자가 서비스 접속 |
-| Outbound | 내부 → 외부 | 클러스터가 패키지 다운로드 |
+**초등학생도 이해하는 설명:**
+
+```
+내 집(서버)을 기준으로 생각하면 된다.
+
+Inbound = 누군가 우리 집 문을 두드리는 것 (들어오는 것)
+  예) 택배기사가 집으로 택배를 가져옴
+  예) 친구가 우리 집에 방문
+  → 외부 → 내부 방향
+
+Outbound = 내가 밖으로 나가는 것 (나가는 것)
+  예) 내가 편의점에 사러 나감
+  예) 내가 친구 집에 전화함
+  → 내부 → 외부 방향
+```
+
+네트워크에서:
+
+```
+Inbound  = 인터넷(외부) → 내 서버(내부)로 들어오는 트래픽
+           예) 사용자가 웹사이트 접속, Databricks Control Plane이 클러스터에 명령 전송
+
+Outbound = 내 서버(내부) → 인터넷(외부)으로 나가는 트래픽
+           예) 클러스터가 패키지 다운로드, S3에 데이터 저장
+```
+
+| 구분 | 방향 | 비유 | 예시 |
+|------|------|------|------|
+| Inbound | 외부 → 내부 | 택배가 집으로 옴 | 사용자가 서비스 접속 |
+| Outbound | 내부 → 외부 | 내가 밖에 나감 | 클러스터가 패키지 다운로드 |
 
 ---
 
@@ -434,6 +460,75 @@ DNS + Private Link 설정 후 **인터넷 직접 접근을 차단**하는 마지
 > Private Link = 통로 생성
 > Route 53 + Record = 트래픽을 그 통로로 유도
 > Firewall = 인터넷 우회 차단
+
+---
+
+## Databricks 필수 포트 (6666, 8443~8451)
+
+### 왜 이 포트들이 필요한가
+
+Databricks는 **Secure Cluster Connectivity (SCC)** 구조를 사용.
+클러스터가 Control Plane에 **먼저 터널을 연결**하고, Control Plane이 그 터널을 통해 클러스터를 제어.
+
+```
+[클러스터 EC2 - Private Subnet]
+  │
+  │ Outbound 8443~8451 (클러스터가 먼저 터널 연결)
+  ▼
+[Databricks Control Plane]
+  │
+  │ Inbound 6666 (터널을 통해 클러스터에 명령 전송)
+  ▼
+[클러스터 EC2]
+```
+
+### 각 포트 역할
+
+| 포트 | 방향 | 용도 |
+|------|------|------|
+| **443** | Outbound | HTTPS - 기본 통신 |
+| **6666** | Inbound | SCC 터널 수신 - Control Plane 명령 받는 포트 |
+| **8443~8451** | Outbound | SCC 터널 연결 - 클러스터가 Control Plane에 터널 개설 |
+
+### 포트가 빠졌을 때 발생하는 문제
+
+```
+8443~8451 Outbound 없음
+  → 클러스터가 Control Plane에 터널 연결 불가
+  → 클러스터 상태가 Pending에서 멈춤
+  → Notebook 연결 안 됨, Job 실행 안 됨
+
+6666 Inbound 없음
+  → Control Plane이 클러스터에 명령 전송 불가
+  → 클러스터는 켜졌는데 아무것도 실행 안 됨
+```
+
+### Security Group 설정 (필수 포트 전체)
+
+```
+Inbound Rules:
+  Port 6666        TCP   Databricks Control Plane IP   ← SCC 터널 수신
+
+Outbound Rules:
+  Port 443         TCP   0.0.0.0/0                     ← HTTPS
+  Port 8443~8451   TCP   Databricks Control Plane IP   ← SCC 터널 연결
+```
+
+### NACL 설정 주의 (Stateless - 양방향 모두 명시)
+
+```
+Inbound:
+  Rule 100  Port 6666       TCP   Databricks Control Plane IP   ALLOW
+  Rule 110  Port 8443-8451  TCP   Databricks Control Plane IP   ALLOW  ← 응답 트래픽
+
+Outbound:
+  Rule 100  Port 443        TCP   0.0.0.0/0                     ALLOW
+  Rule 110  Port 8443-8451  TCP   Databricks Control Plane IP   ALLOW
+  Rule 120  Port 6666       TCP   Databricks Control Plane IP   ALLOW  ← 응답 트래픽
+```
+
+> NACL은 Stateless → 인바운드 허용해도 아웃바운드 응답을 따로 허용해야 함.
+> Security Group은 Stateful → 인바운드 허용 시 응답은 자동 허용.
 
 ---
 
