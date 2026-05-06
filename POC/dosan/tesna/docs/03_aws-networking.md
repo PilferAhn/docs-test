@@ -461,6 +461,55 @@ DNS + Private Link 설정 후 **인터넷 직접 접근을 차단**하는 마지
 > Route 53 + Record = 트래픽을 그 통로로 유도
 > Firewall = 인터넷 우회 차단
 
+### DNS가 중요한 이유
+
+**DNS는 "어디로 연결할지 주소를 알려주는 것".**
+주소가 틀리면 문(NACL/SG)을 아무리 열어도 엉뚱한 곳으로 연결됨.
+
+```
+클러스터가 Control Plane에 접속할 때:
+
+1단계: workspace.cloud.databricks.com 을 DNS로 조회 ← 여기가 핵심
+2단계: IP 주소 받아서 그 IP로 연결 시도
+3단계: NACL / SG 통과 여부 확인
+
+DNS가 공인 IP를 돌려주면
+→ 아무리 NACL/SG를 열어도 Private Link를 안 타고 인터넷으로 나감
+```
+
+**상황별 DNS 중요도:**
+
+```
+Private Link 사용 시 (매우 중요)
+  DNS 조회 → 공인 IP 반환 → 인터넷 경유 → Private Link 미사용
+  DNS 조회 → Route 53 사설 IP 반환 → Private Link 경유 → 정상
+
+Public Access ON 상태 (덜 중요)
+  인터넷 경유 접속 허용한 상태
+  → 공인 DNS로 공인 IP 반환해도 동작함
+  → 이 경우는 NACL/SG가 더 중요
+```
+
+**연결 안 될 때 트러블슈팅 순서:**
+
+```
+1. DNS 먼저 확인
+   nslookup workspace.cloud.databricks.com
+   → 사설 IP 반환 → Private Link 정상
+   → 공인 IP 반환 → Route 53 Private Hosted Zone 설정 확인
+
+2. NACL 확인
+   → 0.0.0.0/0으로 임시 오픈 후 테스트
+   → 연결되면 NACL IP 설정 문제
+   → 여전히 안 되면 다른 원인
+
+3. Security Group 확인
+   → 포트 6666, 8443~8451 열려있는지 확인
+
+4. Private Link Endpoint 상태 확인
+   → AWS 콘솔에서 Available 상태인지 확인
+```
+
 ---
 
 ## 0.0.0.0/0 의미
