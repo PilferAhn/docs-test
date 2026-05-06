@@ -220,11 +220,185 @@ VPC (vpc-0a1b2c3d4e5f)
 
 ---
 
+## Private Link
+
+### 정의
+
+AWS PrivateLink = 인터넷을 거치지 않고 서비스에 **VPC 내부에서 직접 접근**하는 전용 통로.
+Databricks에서는 두 구간에 각각 적용.
+
+```
+[사용자 브라우저 / API 클라이언트]
+          │
+          │ ← Front-end Private Link
+          ▼
+[Databricks Control Plane]
+          │
+          │ ← Back-end Private Link
+          ▼
+[고객사 VPC - 클러스터 EC2 (Data Plane)]
+```
+
+### Front-end Private Link
+
+**사용자 → Databricks Workspace** 구간을 인터넷 없이 연결.
+
+```
+[일반 방식]
+사용자 → 인터넷 → Databricks Workspace (공인 IP)
+
+[Front-end Private Link]
+사용자 → 고객사 VPC → Interface Endpoint → Databricks Workspace
+```
+
+- 언제 필요: 보안 정책상 인터넷 경유 불가, Workspace를 공인 IP로 노출하고 싶지 않을 때
+
+### Back-end Private Link
+
+**Databricks Control Plane → 고객사 클러스터(EC2)** 구간을 인터넷 없이 연결.
+
+```
+[일반 방식]
+Control Plane → 인터넷 → NAT Gateway → 클러스터 EC2
+
+[Back-end Private Link]
+Control Plane → AWS PrivateLink → 클러스터 EC2
+```
+
+- 언제 필요: 클러스터 제어 트래픽의 인터넷 경유를 차단하고 싶을 때
+
+### Front-end vs Back-end 비교
+
+| | Front-end | Back-end |
+|--|-----------|----------|
+| **구간** | 사용자 ↔ Workspace | Control Plane ↔ 클러스터 |
+| **차단 대상** | 외부 인터넷에서 UI/API 접근 | 클러스터 제어 통신의 인터넷 경유 |
+| **구현 방식** | Interface VPC Endpoint | Interface VPC Endpoint |
+
+### AWS 구현
+
+```
+VPC > Endpoints > Create Endpoint
+  Type: Interface
+  Service: com.amazonaws.vpce.ap-northeast-2.databricks-XXXXX
+  Subnet: Databricks 클러스터 Subnet 선택
+  Security Group: Databricks 전용 SG 선택
+```
+
+---
+
+## Route 53 / DNS / Firewall (Private Link 완성을 위한 추가 설정)
+
+### 왜 필요한가
+
+Private Link(VPC Endpoint)를 만들어도 **DNS가 공인 IP를 가리키면 트래픽이 Private Link를 타지 않음**.
+DNS 설정으로 트래픽을 Private Link 통로로 유도해야 완성됨.
+
+```
+[Private Link만 만든 상태 - 문제]
+사용자가 workspace.cloud.databricks.com 접속
+  → DNS 조회 → 공인 IP 반환 → 인터넷으로 접속 (Private Link 미사용)
+
+[Route 53 설정 후 - 정상]
+사용자가 workspace.cloud.databricks.com 접속
+  → DNS 조회 → Route 53 Private Hosted Zone → VPC Endpoint 사설 IP 반환
+  → Private Link 경유 접속
+```
+
+### Route 53 Private Hosted Zone
+
+VPC 내부에서만 동작하는 **사설 DNS 서버**.
+
+```
+생성:
+  도메인: cloud.databricks.com
+  연결 VPC: 고객사 VPC
+
+효과:
+  VPC 내부에서 workspace URL 조회 시
+  → Private Hosted Zone이 응답
+  → VPC Endpoint 사설 IP 반환 (공인 IP 대신)
+```
+
+### DNS Record (A Record)
+
+Private Hosted Zone 안에 Workspace URL → VPC Endpoint IP를 매핑하는 레코드.
+
+```
+A Record:
+  이름:  *.cloud.databricks.com
+  값:    10.0.1.45 (VPC Endpoint의 사설 IP)
+
+→ VPC 내부 DNS 조회 시 사설 IP 반환
+→ 트래픽이 Private Link를 타게 됨
+```
+
+### Route 53 Inbound Resolver Endpoint
+
+온프레미스나 다른 VPC에서 이 Private Hosted Zone의 DNS를 조회할 수 있는 진입점.
+
+```
+온프레미스 사용자
+  │
+  └─ VPN / Direct Connect
+        │
+        └─ Route 53 Inbound Resolver Endpoint (고객사 VPC 내 생성)
+              │
+              └─ Private Hosted Zone 조회 → VPC Endpoint IP 반환
+```
+
+- 온프레미스 연결이 없으면 불필요
+- VPC 내부 사용자만 있을 경우 Private Hosted Zone만으로 충분
+
+### Firewall
+
+DNS + Private Link 설정 후 **인터넷 직접 접근을 차단**하는 마지막 관문.
+
+```
+허용:
+  VPC Endpoint → Databricks (내부 통신)
+  특정 포트 / IP만 허용
+
+차단:
+  Databricks 도메인으로의 직접 인터넷 트래픽
+  Public Access OFF 시 완전 차단
+```
+
+### 전체 설정 순서
+
+```
+1. VPC Endpoint (Interface) 생성
+      └─ Databricks PrivateLink 서비스 연결
+
+2. Route 53 Private Hosted Zone 생성
+      └─ 고객사 VPC에 연결
+
+3. DNS A Record 등록
+      └─ workspace URL → VPC Endpoint 사설 IP
+
+4. Route 53 Inbound Resolver 생성 (온프레미스 연결 시)
+      └─ 외부에서 Private Hosted Zone 조회 가능하게
+
+5. Firewall 규칙 설정
+      └─ 인터넷 직접 접근 차단
+      └─ Private Link 경로만 허용
+```
+
+> Private Link = 통로 생성
+> Route 53 + Record = 트래픽을 그 통로로 유도
+> Firewall = 인터넷 우회 차단
+
+---
+
 ## POC 체크포인트
 
 - [ ] Private Subnet 최소 2개 (Multi-AZ)
 - [ ] NAT Gateway 구성 (Outbound 인터넷 필요 시)
-- [ ] S3 VPC Endpoint 구성 (S3 트래픽을 인터넷 안 거치게)
+- [ ] S3 VPC Endpoint (Gateway) 구성
+- [ ] Databricks Private Link (Interface Endpoint) 구성
+- [ ] Route 53 Private Hosted Zone + A Record 설정
+- [ ] Route 53 Inbound Resolver (온프레미스 연결 시)
 - [ ] Security Group: Databricks 전용 SG 생성
 - [ ] NACL: 인/아웃바운드 포트 규칙 양방향 확인
+- [ ] Firewall: 인터넷 직접 접근 차단 규칙
 - [ ] Databricks Control Plane IP 대역 화이트리스트 추가

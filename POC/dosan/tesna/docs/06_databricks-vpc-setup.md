@@ -115,6 +115,63 @@ NAT Gateway
 
 ---
 
+## Public Access 설정
+
+### 개념
+
+Databricks Workspace에 **인터넷(공인 IP)으로 접근을 허용할지** 결정하는 설정.
+
+```
+Public Access = ON (기본값)
+  → 인터넷에서 workspace URL 직접 접근 가능
+  → Private Link와 동시에 사용 가능 (둘 다 허용)
+
+Public Access = OFF
+  → 인터넷 접근 완전 차단
+  → Private Link 경로로만 접근 가능
+```
+
+### Public Access ON + Private Link 병행 (POC 권장)
+
+```
+내부 사용자 → Private Link 경유 접속
+외부 사용자 → 인터넷 경유 접속 (둘 다 허용)
+```
+
+**왜 POC에서 ON으로 두는가:**
+- Private Link만 쓰면 고객사 VPC 내부에서만 접근 가능
+- 외부 개발자, Databricks 지원팀 등 접근 불가
+- VPN 없으면 아무도 못 들어옴 → POC 진행 어려움
+
+### Public Access OFF (운영 권장)
+
+```
+인터넷 → Workspace 접근 완전 차단
+Private Link → 접근 가능
+
+필요 선행 조건:
+  - Private Link 설정 완료
+  - Route 53 Private Hosted Zone + DNS Record 설정 완료
+  - 사용자가 VPN 또는 내부 네트워크에 연결된 상태
+```
+
+### 단계별 전환 전략
+
+```
+POC 단계
+  Public Access = ON
+  Private Link 설정 (내부 통신용)
+  → 외부/내부 모두 접근 가능, 빠른 개발/검증
+
+운영 전환 시
+  Public Access = OFF
+  Private Link 필수
+  Route 53 + DNS 설정 완료 후
+  → 보안 강화, 인터넷 노출 완전 차단
+```
+
+---
+
 ## 체크리스트 (Customer Managed VPC 선택 시)
 
 - [ ] 고객사 AWS 계정 ID 확보
@@ -122,5 +179,8 @@ NAT Gateway
 - [ ] VPC ID, Subnet ID 확인
 - [ ] NAT Gateway 존재 여부 확인
 - [ ] S3 VPC Endpoint 생성
+- [ ] Databricks Private Link (Interface Endpoint) 생성
+- [ ] Route 53 Private Hosted Zone + DNS Record 설정
 - [ ] Security Group 생성 (Databricks Control Plane IP 허용)
+- [ ] Public Access 설정 (POC: ON, 운영: OFF)
 - [ ] SCP 정책 확인 (필요 서비스 차단 여부)
