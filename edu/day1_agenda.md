@@ -3,10 +3,11 @@
 ## 목차
 1. [Databricks 개요](#1-databricks-개요)
 2. [Databricks 핵심 구성요소](#2-databricks-핵심-구성요소)
-3. [Data Engineering 기본 개념](#3-data-engineering-기본-개념)
+3. [Data Engineering 심화 개념](#3-data-engineering-심화-개념)
 4. [Databricks에서의 Data Engineering](#4-databricks에서의-data-engineering)
-5. [Compute / Cluster 설정](#5-compute--cluster-설정)
-6. [Hands-on Lab](#6-hands-on-lab)
+5. [Spark SQL vs RDB SQL](#5-spark-sql-vs-rdb-sql)
+6. [Compute / Cluster 설정](#6-compute--cluster-설정)
+7. [Hands-on Lab](#7-hands-on-lab)
 
 ---
 
@@ -47,7 +48,29 @@
 
 ---
 
-## 5. Compute / Cluster 설정
+## 5. Spark SQL vs RDB SQL
+- SQL 문법은 같지만 실행 방식이 다르다
+  - RDB — 단일 서버에서 인덱스 기반으로 행(Row)을 찾아 처리
+  - Spark SQL — 분산 클러스터에서 파일 전체를 병렬 스캔하여 처리
+- 인덱스가 없다 — 대신 파티셔닝과 파일 포맷으로 성능을 제어
+- 트랜잭션 처리 방식의 차이
+  - RDB — Row-level lock, OLTP에 최적화
+  - Spark SQL (Delta) — MVCC 방식, 대용량 배치에 최적화
+- JOIN 동작 방식의 차이
+  - RDB — Nested Loop / Hash Join (소규모 최적화)
+  - Spark SQL — Shuffle Hash Join / Broadcast Join (분산 환경 최적화)
+- 지원하지 않는 것들
+  - Row-level UPDATE/DELETE는 Delta Lake 없이 불가
+  - Stored Procedure / Trigger 미지원
+  - Auto Increment PK 개념 없음
+- Spark SQL만의 강점
+  - 수십억 건 데이터도 수분 내 집계 가능
+  - DataFrame API와 혼용 가능 (SQL ↔ Python 전환 자유로움)
+  - `%sql` 매직 커맨드로 Notebook 내 SQL 직접 실행
+
+---
+
+## 6. Compute / Cluster 설정
 > 실습 전 직접 클러스터를 생성하고 설정하는 과정을 다룬다
 
 - Compute 유형 이해
@@ -85,7 +108,7 @@
 
 ---
 
-## 6. Hands-on Lab
+## 7. Hands-on Lab
 - Cluster 직접 생성 및 설정
 - Notebook 작성 및 Cluster 연결
 - CSV 데이터 로드 (inferSchema / 명시적 스키마)
