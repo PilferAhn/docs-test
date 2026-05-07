@@ -53,10 +53,27 @@
 ---
 
 ## 6. Hands-on Lab
-- Aggregation Gold Table 생성
-- ML 학습용 Feature Dataset 생성
-- 기본 ML 모델 생성 및 학습
-- MLflow Tracking 실습
-- Model Registry 등록
-- Serving Endpoint 생성 및 테스트
-- 실습용 데이터베이스는 별도 제공 예정
+
+> Day 1에서 구축한 Silver 테이블을 이어받아 Gold → 모델 학습 → 서빙까지 연결하는 흐름으로 진행
+
+**Step 1. Gold Table 생성 (Silver → Gold)**
+- Day 1에서 만든 Silver 테이블 확인
+- 집계/피처 가공으로 Aggregation Gold Table 생성
+- Gold Table을 Delta로 저장 및 Unity Catalog 등록
+
+**Step 2. ML 학습용 Feature Dataset 구성**
+- Gold Table에서 학습용 Feature / Label 분리
+- Train / Test 데이터셋 분할
+
+**Step 3. 모델 학습 및 MLflow Tracking**
+- 기본 ML 모델 학습 (scikit-learn / XGBoost 등)
+- MLflow로 Experiment / Metrics / Parameters / Artifact 기록
+- 여러 파라미터 조합 실험 및 결과 비교
+
+**Step 4. Model Registry 등록**
+- 최적 모델을 Unity Catalog Model Registry에 등록
+- 모델 버전 관리 및 Champion 지정
+
+**Step 5. 배치 추론**
+- 등록된 모델로 Gold Table 전체 배치 추론 실행
+- 추론 결과를 Delta Table로 저장
