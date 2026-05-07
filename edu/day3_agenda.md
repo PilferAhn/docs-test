@@ -6,7 +6,7 @@
 1. [AI Agent 기초 개념](#1-ai-agent-기초-개념)
 2. [Mosaic AI Vector Search](#2-mosaic-ai-vector-search)
 3. [LangGraph 개요](#3-langgraph-개요)
-4. [강사 데모](#4-강사-데모)
+4. [데모 시연](#4-데모-시연)
 
 ---
 
@@ -36,7 +36,7 @@
 
 ---
 
-## 4. 강사 데모
-- Vector Search Index 생성 및 동기화 시연
-- ChatDatabricks + DatabricksVectorSearch 연동 시연
-- LangGraph Agent 동작 흐름 시연
+## 4. 데모 시연
+- Vector Search Index 생성 및 동기화
+- ChatDatabricks + DatabricksVectorSearch 연동
+- LangGraph Agent 동작 흐름
