@@ -15,6 +15,7 @@
 | 05 | [deploy-prefix.md](./05_deploy-prefix.md) | 리소스 네이밍 및 Prefix 전략 |
 | 06 | [databricks-vpc-setup.md](./06_databricks-vpc-setup.md) | Databricks Managed vs Customer Managed VPC |
 | 07 | [unity-catalog.md](./07_unity-catalog.md) | UC Bucket, Root Role, UC Root, External Location |
+| 08 | [databricks-architecture.md](./08_databricks-architecture.md) | Control Plane, Data Plane, STS, Kinesis |
 
 ---
 

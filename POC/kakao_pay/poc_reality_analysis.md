@@ -93,6 +93,20 @@ Cloudera 전용 스토리지인 Kudu 테이블을 Spark Kudu Connector로 읽어
 
 ---
 
+### B-2. 메달리온 아키텍처 / Asset Bundles
+
+**목적**
+SDP(Spark Declarative Pipeline) 기반 bronze/silver/gold 메달리온 파이프라인 구성 및 Asset Bundles를 활용한 코드 표준화·CI/CD 배포 자동화 검증.
+
+**왜 그대로 구현이 안 되는가**
+- 특별한 외부 의존성이 없어 한계 사항이 거의 없다.
+- 단, 사내 GitHub Enterprise 연동은 카카오페이 측의 접근 허용이 필요하다.
+
+**실제 구현**
+9일 PoC 내에서 비교적 높은 완성도로 구현 가능한 시나리오. SDP UI에서 단일/복수 pipeline을 구성하고, Asset Bundles 코드 구조(databricks.yml + pipeline.yml + job.yml)를 작성·배포하는 전체 흐름을 실제로 시연할 수 있다. GitHub Enterprise 연동은 설정 가이드 문서로 대체.
+
+---
+
 ### B. ETL / 배치 파이프라인 전환
 
 **목적**
@@ -149,7 +163,7 @@ Databricks SQL Warehouse JDBC 엔드포인트 설정, Service Principal 생성, 
 - 100ms는 사람이 인지하기 어려운 수준으로, 일반 분석 DB 통상 응답(2~3초)과 카테고리 자체가 다르다.
 
 **실제 구현**
-워밍업된 SQL Warehouse에서 단순 집계 쿼리의 응답 시간을 측정하여 수치를 제시한다. 달성 가능한 범위의 최솟값을 보여주되, 100ms 목표에 대해서는 1차 정리 문서에서 이미 지적했듯 목표 완화 협의가 병행되어야 한다. 이 시나리오는 Databricks SQL Warehouse가 아닌 별도 아키텍처(예: DynamoDB 서빙 레이어, ElastiCache) 조합을 제안하는 방향이 더 현실적일 수 있다.
+Serverless SQL Warehouse는 콜드 스타트를 제외한 조회 성능 테스트는 가능한 것으로 확인됨. 콜드 스타트를 제외한 일반 조회는 Serverless로, 콜드 스타트 비교는 Provisioned 클러스터로 별도 진행하는 방식으로 분리 테스트. 100ms 목표에 대해서는 목표 완화 협의가 병행되어야 하며, Databricks SQL Warehouse 단독보다 별도 서빙 레이어(예: DynamoDB, ElastiCache) 조합을 제안하는 방향이 더 현실적일 수 있다.
 
 ---
 
@@ -209,6 +223,8 @@ GDPR 기준으로 탈퇴자 개인정보를 84TB 데이터에서 12만 건, 48�
 **실제 구현**
 수십 GB 수준의 샘플 데이터에 Deletion Vectors를 적용한 삭제 기능을 시연하고, Liquid Clustering으로 탈퇴자 PK 기준 파일을 집중시켜 삭제 범위를 좁히는 최적화 기법을 보여준다. 행 수준 동시성은 Notebook 내 병렬 셀 실행으로 제한적으로 재현한다. PoC 가장 핵심 시나리오임에도 불구하고 현실적으로 가장 불완전하게 검증될 수밖에 없는 항목이다.
 
+> ⚠️ **미확정:** 1년 84TB 데이터 PoC 환경 확보 가능 여부는 아직 확인 필요. 확보 불가 시 샘플 데이터 + 성능 외삽으로 대체.
+
 ---
 
 ### J. 보안 / 권한 / 컴플라이언스
@@ -237,6 +253,20 @@ Databricks Workspace의 AWS 클라우드 구성(S3 버킷 분리, Gateway Endpoi
 
 **실제 구현**
 Databricks Workspace + Unity Catalog + S3 버킷 구성(DBFS, UC, External 분리)은 완전히 구현 가능하다. Keycloak SSO 체인은 설정 가이드 문서로 대체하고, Kerberos/HDFS 연동은 데모 불가 항목으로 분류한다. 이 부분은 PoC 이후 실제 마이그레이션 단계에서 카카오페이 내부 팀과 함께 진행해야 하는 항목임을 명시한다.
+
+---
+
+### L-2. MySQL DB Ingestion (Lakeflow Connect)
+
+**목적**
+Lakeflow Connect MySQL Connector를 통해 MySQL DB를 CDC + 초기 스냅샷 방식으로 Delta Lake에 수집하는 파이프라인 검증.
+
+**왜 그대로 구현이 안 되는가**
+- 카카오페이 측에서 5월 말까지 대상 MySQL 인스턴스·계정·테이블 정의·접근 권한을 사전 공유해야 진행 가능. 미공유 시 데모 불가.
+- MySQL이 온프렘에 있어 VPN 또는 네트워크 연결 설정이 선행되어야 한다.
+
+**실제 구현**
+카카오페이가 MySQL 접근 권한을 제공하면, Lakeflow Connect MySQL Connector로 초기 스냅샷 + CDC 파이프라인 전체 흐름을 실제 구현 가능. 미제공 시 Connector 설정 방법 가이드 문서로 대체.
 
 ---
 
@@ -275,12 +305,12 @@ Delta Lake Native, Managed Iceberg, External Iceberg, UniForm, Parquet 간 읽�
 Databricks가 단순히 빠른 것이 아니라 총비용(TCO) 기준으로도 온프렘 대비 유리한지 검증한다. Spot Instance, Serverless vs Classic SQL Warehouse, S3 Lifecycle 정책, OPTIMIZE/VACUUM 전략을 포함한다.
 
 **왜 그대로 구현이 안 되는가**
-- Serverless SQL Warehouse는 CSP 안전성 평가가 미완료 상태로 금융사 사용 불가. 비용 비교의 핵심 항목이 현재 사용 불가한 상태다.
+- Serverless SQL Warehouse는 콜드 스타트 시나리오를 제외한 일반 조회 성능 테스트는 진행 가능한 것으로 확인됨. 단, 콜드 스타트 관련 비교는 Provisioned 클러스터로 별도 진행 필요.
 - 실제 운영 워크로드 없이 PoC 환경에서 측정한 비용은 실제 운영 비용과 다를 수 있다.
 - 카카오페이의 현재 온프렘 TCO 수치는 카카오페이가 제공해야 비교 가능하다.
 
 **실제 구현**
-Classic SQL Warehouse 기준 DBU 소비량을 측정하고, Spot Instance 설정 방법을 시연한다. Serverless 비용은 Databricks 공식 자료와 레퍼런스 사례로 대체한다. S3 Lifecycle 정책(Standard-IA, Glacier 전환)과 VACUUM 전략은 설계 문서로 제공한다.
+Serverless SQL Warehouse 기준 일반 조회 DBU 소비량 측정 가능. 콜드 스타트 비교는 Provisioned 클러스터로 별도 측정. Spot Instance 설정 방법을 시연한다. S3 Lifecycle 정책(Standard-IA, Glacier 전환)과 VACUUM 전략은 설계 문서로 제공한다.
 
 ---
 
@@ -334,10 +364,11 @@ Databricks Feature Store, Mosaic AI Vector Search 기능을 데모 데이터로 
 
 | 구분 | 시나리오 |
 |:---|:---|
-| **실제 구현 가능** | A-2 (Iceberg→Delta), M (포맷 비교·Liquid Clustering·Deletion Vectors), J (UC 권한·마스킹), K (Workspace·S3 구성 부분) |
-| **기능 데모 수준** | B (배치 ETL 샘플), C (Databricks 측 성능만), F (Auto Loader DLT), G (소규모 DDL), N (Classic 비용 측정), O (UC System Tables), P-1 (MLflow 모델 등록) |
-| **시뮬레이션/대체** | A-1 (S3 replay), A-3 (추출 파일 변환), H (CDC 파일 replay), I (소규모 삭제 데모) |
-| **구현 사실상 불가** | D (MSTR 큐브), E (100ms), K (Keycloak SSO·Kerberos), L (DistCp 이관 속도), P-2 (LAL 전체) |
+| **실제 구현 가능** | A-2 (Iceberg→Delta), B-2 (메달리온·Asset Bundles), M (포맷 비교·Liquid Clustering·Deletion Vectors), J (UC 권한·마스킹), K (Workspace·S3 구성 부분) |
+| **기능 데모 수준** | B (배치 ETL 샘플), C (Databricks 측 성능만), F (Auto Loader DLT), G (소규모 DDL), N (Serverless 일부 + Classic 비용 측정), O (UC System Tables), P-1 (MLflow 모델 등록) |
+| **시뮬레이션/대체** | A-1 (S3 replay), A-3 (추출 파일 변환), H (CDC 파일 replay), I (소규모 삭제 데모), L-2 (MySQL 접근 권한 미확정 시 가이드 대체) |
+| **구현 사실상 불가** | D (MSTR 큐브), E (100ms 목표 자체), K (Keycloak SSO·Kerberos), L (DistCp 이관 속도), P-2 (LAL 전체) |
+| **조건부 가능** | L-2 (MySQL Ingestion — 카카오페이 접근 권한 제공 시), E (Serverless 콜드스타트 제외 조회는 가능) |
 
 ### 핵심 메시지
 

@@ -4,6 +4,7 @@
 > - `poc_overview.md` — 시나리오 전체 설계
 > - `poc_reality_analysis.md` — 시나리오별 현실 구현 범위
 > - `04-28_databricks_pipeline_discussion.md` — 04/28 기술 논의 Action Items
+> - `requreiemtn.xlsx` — 카카오페이 요구사항 원본 (DE-01 ~ DE-59)
 
 ---
 
@@ -120,7 +121,6 @@
   ```
 
 - [ ] **스키마 자동 추론(Schema Inference) 옵션 테스트**
-  - Delta 테이블 생성 시 스키마를 미리 정의하지 않고 파일에서 자동 추론
   ```sql
   COPY INTO kpay_poc.bronze.sample_table
   FROM 's3://<버킷명>/sample/'
@@ -130,13 +130,8 @@
 
 - [ ] **적재 결과 검증 쿼리 작성**
   ```sql
-  -- 적재 행 수 확인
   SELECT COUNT(*) FROM kpay_poc.bronze.sample_table;
-
-  -- 체크포인트 이력 확인 (처리된 파일 목록)
   DESCRIBE HISTORY kpay_poc.bronze.sample_table;
-
-  -- 파일 크기 및 파티션 구조 확인
   DESCRIBE DETAIL kpay_poc.bronze.sample_table;
   ```
 
@@ -145,7 +140,6 @@
 ### 2-5. 시나리오 A-2 — Iceberg → Delta 전환
 
 > **구현 수준: 실제 구현 가능** (전체 시나리오 중 완성도 가장 높음)
-> 카카오페이가 S3에 올려준 Iceberg 파일을 Spark으로 읽어 Delta로 변환한다.
 
 - **대상 테이블**
 
@@ -154,42 +148,30 @@
   | `tiara_complete_log_raw` | 2024/10/20 ~ 10/26 |
   | `tiara_ns` | 2024/10/20 ~ 10/26 |
 
-- **전환 방식**
-  - COPY INTO는 Iceberg 포맷을 직접 읽지 못함
-  - Spark DataFrame으로 Iceberg 파일 읽기 → Delta 포맷으로 write 하는 방식 사용
-
 - [ ] **Iceberg 파일 읽기 확인**
   ```python
-  # Iceberg 파일 읽기 (S3 경로 기준)
   df = spark.read.format("iceberg") \
       .load("s3://<버킷명>/iceberg/tiara_complete_log_raw/")
-
   df.printSchema()
   df.count()
   ```
 
 - [ ] **Delta 테이블로 변환 및 저장**
   ```python
-  # Delta 포맷으로 저장 (Bronze 테이블)
   df.write \
       .format("delta") \
       .mode("overwrite") \
       .saveAsTable("kpay_poc.bronze.tiara_complete_log_raw")
   ```
 
-- [ ] **측정 항목 기록**
-  - 변환 소요 시간 (초 단위)
-  - 원본 Iceberg 파일 크기 vs 변환 후 Delta 파일 크기 (압축률 비교)
-  - 파티션 구조 변화 확인
-
+- [ ] **측정 항목 기록** (변환 소요 시간, 원본 vs Delta 파일 크기, 파티션 구조 변화)
 - [ ] **tiara_ns 동일 방식으로 반복 실행**
 
 ---
 
 ### 2-6. 시나리오 A-3 — Kudu → Delta 전환
 
-> **구현 수준: 시뮬레이션** (Kudu 직접 연결 불가 → 추출 파일 기반으로 진행)
-> 카카오페이가 Kudu 데이터를 Parquet/CSV로 추출하여 S3에 올려주면, COPY INTO로 Delta로 변환한다.
+> **구현 수준: 시뮬레이션** (Kudu 직접 연결 불가 → 추출 파일 기반 진행)
 
 - **대상 테이블**
 
@@ -198,13 +180,8 @@
   | `an005d04` | 2024/10/01 ~ 10/26 |
   | `bp501d01` | 2025/01/01 ~ 10/26 |
 
-- **전환 방식**
-  - Kudu Connector를 통한 실시간 연결은 대상 외 (온프렘 직접 접근 불가)
-  - 카카오페이가 Kudu → Parquet/CSV 추출 → S3 업로드 후, COPY INTO 실행
-
 - [ ] **S3 파일 확인 및 포맷 파악**
   ```sql
-  -- 카카오페이가 올려준 파일 목록 확인
   LIST 's3://<버킷명>/kudu/an005d04/';
   ```
 
@@ -217,43 +194,16 @@
   COPY_OPTIONS ('mergeSchema' = 'true');
   ```
 
-- [ ] **CSV 포맷인 경우 옵션 추가**
-  ```sql
-  COPY INTO kpay_poc.bronze.an005d04
-  FROM 's3://<버킷명>/kudu/an005d04/'
-  FILEFORMAT = CSV
-  FORMAT_OPTIONS (
-    'header' = 'true',
-    'inferSchema' = 'true',
-    'delimiter' = ','
-  );
-  ```
-
 - [ ] **bp501d01 동일 방식으로 반복 실행**
-
-- [ ] **한계 사항 문서화**
-  - Kudu 고유 특성(실시간 CRUD 순서 보장, 동시 업데이트 처리)은 이 방식으로 검증 불가
-  - 해당 내용을 데모 노트북 상단 주석 또는 별도 설명 셀로 명시
+- [ ] **한계 사항 노트북 상단 주석으로 명시** (Kudu 실시간 CRUD 특성은 검증 불가)
 
 ---
 
 ### 2-7. 스케줄링 잡 구성
 
-> COPY INTO는 명령 자체가 트리거가 아니므로, Job으로 감싸야 실제 파이프라인이 된다.
-
-- [ ] **Databricks Job 생성**
-  - Job 타입: Notebook Task (COPY INTO 노트북 지정)
-  - 클러스터: Job Cluster (실행 시에만 생성, 완료 후 자동 종료)
-  - 스케줄: Cron 표현식으로 주기 설정 (예: 매일 새벽 2시 `0 2 * * *`)
-
-- [ ] **Job 실행 후 확인 항목**
-  - Job 실행 로그에서 처리된 파일 수 및 적재 행 수 확인
-  - 2회 연속 실행 시 2회차에서 `0 files copied` 출력되는지 확인 (체크포인트 정상 동작)
-  - Job 실패 시 알림 설정 (이메일 또는 Webhook)
-
-- [ ] **증분 적재 시나리오 시연**
-  - 첫 번째 Job 실행 후 S3에 신규 파일 추가
-  - 두 번째 Job 실행 시 신규 파일만 처리되는지 확인
+- [ ] **Databricks Job 생성** (Notebook Task, Job Cluster, Cron 스케줄)
+- [ ] **Job 실행 후 확인** (처리 파일 수, 2회차 `0 files copied` 확인, 실패 알림 설정)
+- [ ] **증분 적재 시나리오 시연** (신규 파일 추가 후 2회차 실행)
 
 ---
 
@@ -263,24 +213,179 @@
 > **현실 범위:** 시나리오 B는 데모 수준 (샘플 SQL 재작성). 시나리오 F는 Auto Loader → DLT 파이프라인 구성 가능.
 
 - [ ] **SDP 파이프라인 초기 구성**
-  - Databricks UI에서 SDP 파이프라인 초기 코드 생성 (Python 또는 SQL)
-  - Bronze 테이블을 소스로 Silver 테이블로 변환하는 파이프라인 작성
+  - Bronze → Silver 변환 파이프라인 작성 (Python 또는 SQL)
   - 배치 모드 / Continuous 모드 차이 확인
 
 - [ ] **Expectation(데이터 품질 규칙) 설정**
-  - SQL 또는 Python 코드로 데이터 품질 조건 정의
-  - 조건 불만족 시 처리 방식 설정: drop(누락) 또는 fail(파이프라인 실패)
-  - 딕셔너리(Key-Value) 형태로 규칙 구성 실습
+  - SQL/Python으로 데이터 품질 조건 정의 (drop / fail 처리 방식 포함)
   - `dp.expect_all` 등 Databricks 전용 함수 활용 확인
 
 - [ ] **Auto Loader → DLT 파이프라인 구성 (시나리오 F 대응)**
-  - S3에 새로 올라오는 파일을 Auto Loader가 감지 → DLT 파이프라인으로 처리하는 흐름 구성
+  - S3 신규 파일 감지 → DLT 처리 흐름 구성
   - Materialized View 동기화 기능 시연 (정적 데이터 기준)
 
 - [ ] **배치 ETL 샘플 노트북 작성 (시나리오 B 대응)**
   - 카카오페이가 제공한 대표 SQL을 Databricks Notebook으로 재작성
-  - 샘플 데이터(수 GB) 기준으로 실행 및 결과 확인
-  - 실제 36TB 전체가 아닌 기능 검증 및 전환 가능성 시연 목적
+  - 샘플 데이터(수 GB) 기준 실행
+
+- [ ] **SDP MV 동기화 중 스키마 변경 엣지 케이스 검증 (시나리오 DE-48)**
+  - MV 동기화 진행 중 컬럼 추가/삭제 발생 시 동작 확인
+  - MV 재구축 시간 측정 (SLA: 24시간 이내)
+
+---
+
+## 4. [NEW] 결제 데이터 Wide Table 적재 (시나리오 A-1-B)
+
+> **근거:** DE-29, DE-30 (xlsx)
+> **현실 범위:** 실데이터 PoC — 카카오페이 결제 데이터 제공 시 실제 구현 가능
+
+- **데이터 규모:** 600건/초, 10KB/건, 270컬럼, 1개월 225GB
+- **핵심 검증:** Wide Table 환경에서 Compaction 지연 없이 30분 이내 완료 가능한가
+
+- [ ] **Liquid Clustering 설정 및 적재 파이프라인 구성**
+  - 결제 데이터 테이블에 `CLUSTER BY (결제 PK 또는 날짜 컬럼)` 적용
+  - Predictive Optimize 활성화 → 별도 수동 Compaction 없이 자동 처리 확인
+
+- [ ] **측정 항목 기록**
+  - 초당 처리 건수 (목표: 600건/초 이상)
+  - Compaction 완료 시간 (목표: 30분 이내)
+  - Wide Table(270컬럼) 환경에서 파일 사이즈 분포 확인
+
+- [ ] **Liquid Clustering vs 기존 Partitioning 비교** (DE-56과 연계)
+  - 동일 데이터셋 기준 CRUD 성능 및 Data Skipping 효과 측정
+
+---
+
+## 5. [NEW] Delta Lake 조회 성능 검증 (시나리오 A-1 조회)
+
+> **근거:** DE-24, DE-25, DE-26 (xlsx)
+> **현실 범위:** 실데이터 PoC — 티아라 1개월 7TB 기준
+
+- [ ] **기본 조회 쿼리 성능 측정**
+  - 개인 최근 100건 조회
+  - 특정 서비스 접근 유저 모수 추출
+  - 성공 기준: **Trino 대비 30% 이상 개선** (카카오페이가 Trino 수치 제공 필요)
+
+- [ ] **캐시 히트 효과 측정**
+  - 동일 쿼리 반복 실행 시 캐시 히트율 확인
+  - 데이터 변경(적재/삭제) 후 캐시 무효화 시나리오 정의 및 테스트
+
+- [ ] **Variant Data Type 쿼리 성능 검증** ← 기존 Impala/Trino 미지원 기능
+  - JSON 컬럼 그대로 저장 후 Variant 타입으로 분석 쿼리 실행
+  - 기존 JSON 파싱 방식 대비 쿼리 성능 비교
+  - 사전 준비: 카카오페이와 전환 대상 JSON 스키마 합의 필요
+
+---
+
+## 6. [NEW] 메달리온 아키텍처 + Asset Bundles (시나리오 B-2)
+
+> **근거:** DE-15, DE-16, DE-17, DE-18 (xlsx)
+> **현실 범위:** 실제 구현 가능 — 외부 의존성 없음. GitHub Enterprise 연동은 가이드 문서로 대체.
+
+### 6-1. SDP UI 기반 메달리온 파이프라인
+
+- [ ] **단일 pipeline 구성 (bronze/silver/gold)**
+  - 하나의 SDP pipeline 안에 bronze ST → silver MV → gold MV 정의
+  - Pipelines Editor(DAG·Data Preview·Issues Panel) 사용 경험 정리
+  - 산출물: ST vs MV 선택 기준 문서
+
+- [ ] **복수 pipeline 구성 (Lakeflow Job UI)**
+  - bronze/silver/gold를 각각 별도 pipeline으로 분리
+  - Lakeflow Job UI에서 `pipeline_task` + `depends_on`으로 cross-pipeline 의존성 표현
+  - 산출물: UI 운영 장단점 정리
+
+### 6-2. Asset Bundles 코드 표준화 및 배포
+
+- [ ] **Bundle 코드 구조 작성**
+  - `databricks.yml` + `*.pipeline.yml` + `*.job.yml` 작성
+  - `<pipeline>/<stage>/<table>.py` 3단 트리 구조
+  - `root_path: ../src`로 `src/common/` 모듈 공유 구조 구성
+  - 산출물: Bundle 코드화 장단점 정리
+
+- [ ] **Bundle 배포·롤백·환경 변수 분기 검증**
+  - `databricks bundle deploy` 일괄 배포 및 롤백 테스트
+  - 환경별 변수 분기 (`dev` / `staging` / `prd`)
+  - GitHub Enterprise 연동 가능 여부 → 연동 불가 시 설정 가이드 문서로 대체
+
+---
+
+## 7. [NEW] MySQL DB Ingestion — Lakeflow Connect (시나리오 L-2)
+
+> **근거:** DE-59 (xlsx)
+> **현실 범위:** 조건부 가능 — 카카오페이 MySQL 접근 권한 제공 시 실제 구현, 미제공 시 가이드 문서
+
+- **데이터 규모:** 최대 트래픽 6.875 MB/s, TPS ≈ 7,040 (Parquet 환산)
+- **전제 조건:** 카카오페이 측 **5월 말까지** 대상 MySQL 인스턴스·계정·테이블 정의·접근 권한 공유
+
+- [ ] **카카오페이 MySQL 접근 권한 수신 확인**
+  - 미수신 시 → Lakeflow Connect MySQL Connector 설정 가이드 문서 작성으로 대체
+
+- [ ] **Lakeflow Connect MySQL Connector 구성** (접근 권한 수신 시)
+  - 초기 스냅샷(전체 복제) + CDC(변경분 지속 수집) 파이프라인 설정
+  - as-is 동등 이상 처리량 확인 (TPS 7,040 이상)
+  - Lakeflow Connect 표준 옵션 검증
+
+---
+
+## 8. [NEW] 엣지 케이스 / 추가 검증
+
+### 8-1. Tiara Kafka lag 3시간 시나리오 (DE-27, DE-28)
+
+> **현실 범위:** 실데이터 PoC — Kafka lag 시뮬레이션 환경 사전 준비 필요
+
+- [ ] **Kafka lag 시뮬레이션 환경 준비 방법 카카오페이와 협의**
+  - 3시간 lag(240만 건) 재현 방법 합의 (실제 Consumer 중단 vs 파일 덤프 replay)
+
+- [ ] **lag 복구 검증**
+  - 복구 완료 1시간 이내 달성 여부 측정
+  - Backpressure 처리 동작 확인
+
+- [ ] **피크 트래픽 지속 성능 측정**
+  - 피크 타임 트래픽 양 및 지속 시간 카카오페이 확인 필요
+  - 처리량 유지율 100% 기준 충족 여부
+
+### 8-2. Serverless vs Provisioned 분리 테스트 (DE-37, DE-38)
+
+> **상태 업데이트:** 기존 "Serverless 사용 불가" → "콜드스타트 제외 Serverless 가능"으로 변경
+
+- [ ] **Serverless SQL Warehouse — 콜드스타트 제외 일반 조회 성능 측정**
+  - 티아라 1개월 7TB / 결제 1개월 225GB 기준
+  - P90 응답 시간 측정
+  - 동시 접속 100+ 부하 시뮬레이션 도구/스크립트 선정
+
+- [ ] **Provisioned 클러스터 — 콜드스타트 시간 별도 측정**
+  - 클러스터 완전 종료 후 최초 쿼리 응답까지 소요 시간 측정
+  - Serverless 콜드스타트와 별도 비교 자료로 제공
+
+---
+
+## 9. [NEW] 사전 분석 및 문서화 (1차_정리 Action Items — SE 담당)
+
+> **근거:** `1차_정리.md` Action Items 중 SE 담당 항목
+
+- [ ] **[Action #1] 'Minecraft' 용어 확인**
+  - CDC 맥락에서 내부 도구 'Minecraft'가 무엇인지 카카오페이에 확인
+
+- [ ] **[Action #2] CDC 테스트용 VPN 연결 및 독립 대역폭 확보 가능 여부 문의**
+  - Kafka(온프렘) → Databricks(AWS) Consumer 연결 가능 여부 확인
+  - VPN 미확정 시 S3 파일 기반 replay 방식 확정
+
+- [ ] **[Action #3] ML Feature Store·모델 모니터링 — 실구현 vs 문서 대체 협의**
+
+- [ ] **[Action #7] Serverless CSP 평가 완료 예정 시점 Databricks 측 확인**
+
+- [ ] **[Action #9] Starburst + Iceberg 조합 → UniForm 전환 시 영향도 분석**
+  - Starburst가 UC를 External Metastore로 바라보는 구조 설계 가능 여부
+  - UniForm으로 Delta/Iceberg 공존 기간 운영 방안 검토
+
+- [ ] **[Action #10] Kudu Spark Connector 이관 성능 사전 벤치마크**
+  - 파일 직접 복사 불가, Connector 경유 필수 → 병목 구간 예측
+
+- [ ] **[Action #11] CDC lag 복구 완료 기준 정의 — 카카오페이와 협의**
+  - `lag = 0` 시점 vs 데이터 정합성 검증 완료 시점 중 어느 것을 기준으로 볼지
+
+- [ ] **[Action #12] 탈퇴자 삭제 중 스토리지 일시 2배 증가 비용 PoC 예산 반영**
+  - VACUUM 실행 전 구버전 파일 유지로 스토리지 일시 증가 → 비용 계획에 포함
 
 ---
 
@@ -292,6 +397,13 @@
 | COPY INTO 데모 노트북 | **실제 구현** | Bronze 테이블 생성 |
 | A-2 Iceberg → Delta 전환 | **실제 구현** | 전체 시나리오 중 완성도 가장 높음 |
 | A-3 Kudu → Delta 전환 | **시뮬레이션** | Kudu 추출 파일(Parquet/CSV) 기준, Kudu 직접 연결 없음 |
+| A-1-B 결제 Wide Table 적재 | **실데이터 PoC** | 270컬럼, Liquid Clustering + Predictive Optimize |
+| Delta Lake 조회 성능 검증 | **실데이터 PoC** | Trino 대비 30% 개선 기준, Variant Data Type 포함 |
 | SDP Expectation 설정 | **실제 구현** | Databricks 전용 기능 포함 |
+| SDP MV 동기화 + 스키마 변경 엣지 | **실데이터 PoC** | MV 재구축 SLA 24시간 이내 |
 | Auto Loader → DLT 파이프라인 | **기능 데모** | 실시간 Kafka 연결 없이 S3 파일 기반 시뮬레이션 |
 | 배치 ETL SQL 재작성 | **기능 데모** | 샘플 데이터 기준, 36TB 전체 처리 아님 |
+| B-2 메달리온 아키텍처 + Asset Bundles | **실제 구현** | 외부 의존성 없음, GitHub Enterprise 연동은 가이드 대체 |
+| L-2 MySQL Ingestion (Lakeflow Connect) | **조건부 가능** | 카카오페이 접근 권한 제공 시 실제 구현, 미제공 시 가이드 |
+| Serverless 콜드스타트 제외 조회 | **실제 구현 가능** | 콜드스타트 비교는 Provisioned으로 별도 진행 |
+| Kafka lag 3시간 시나리오 (Tiara) | **조건부 가능** | lag 시뮬레이션 환경 사전 협의 필요 |

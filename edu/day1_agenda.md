@@ -30,7 +30,7 @@
 ---
 
 ## 3. Data Engineering 심화 개념
-- ELT 중심으로의 전환 — 왜 Databricks에서는 ELT가 표준인가
+- ETL 중심으로의 전환 — 왜 Databricks에서는 ETL이 표준인가
 - Batch vs Micro-batch vs Streaming — 선택 기준과 트레이드오프
 - 파일 포맷 선택 전략 — Parquet vs Delta, 언제 무엇을 쓰는가
 - 파티셔닝 전략 — 과도한 파티셔닝의 문제 (Small File Problem)

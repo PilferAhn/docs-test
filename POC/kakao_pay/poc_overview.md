@@ -11,6 +11,7 @@
 2. [PoC 목적 및 범위](#2-poc-목적-및-범위)
 3. [시나리오 A — 데이터 적재 / 마이그레이션](#3-시나리오-a--데이터-적재--마이그레이션)
 4. [시나리오 B — ETL / 배치 파이프라인 전환](#4-시나리오-b--etl--배치-파이프라인-전환)
+   - [시나리오 B-2 — 메달리온 아키텍처 / Asset Bundles](#4-b-시나리오-b-2--메달리온-아키텍처--asset-bundles)
 5. [시나리오 C — 성능 비교](#5-시나리오-c--성능-비교)
 6. [시나리오 D — SQL Warehouse / BI 연동](#6-시나리오-d--sql-warehouse--bi-연동)
 7. [시나리오 E — 실시간 조회 / 서빙](#7-시나리오-e--실시간-조회--서빙)
@@ -21,6 +22,7 @@
 12. [시나리오 J — 보안 / 권한 / 컴플라이언스](#12-시나리오-j--보안--권한--컴플라이언스)
 13. [시나리오 K — 인프라 / 클라우드 구성](#13-시나리오-k--인프라--클라우드-구성)
 14. [시나리오 L — 데이터 이관](#14-시나리오-l--데이터-이관)
+    - [시나리오 L-2 — MySQL DB Ingestion (Lakeflow Connect)](#14-b-시나리오-l-2--mysql-db-ingestion-lakeflow-connect)
 15. [시나리오 M — 데이터 아키텍처 / 저장 포맷](#15-시나리오-m--데이터-아키텍처--저장-포맷)
 16. [시나리오 N — 비용 / TCO 최적화](#16-시나리오-n--비용--tco-최적화)
 17. [시나리오 O — 모니터링 / 관제](#17-시나리오-o--모니터링--관제)
@@ -105,7 +107,7 @@ DataHub                  ← 데이터 카탈로그 (어떤 데이터가 어디 
 **검증 항목**
 
 ```
-처리 성능
+처리 성능 (표준)
 ├── 초당 4.5만 건 처리 가능 여부
 └── CDC → Kafka → Structured Streaming → Delta Lake 전체 지연시간 측정
 
@@ -114,14 +116,58 @@ DataHub                  ← 데이터 카탈로그 (어떤 데이터가 어디 
 ├── pay_account_id 실시간 보강  ← 스트리밍 중 다른 테이블과 조인
 └── Upsert / Merge 검증         ← 동일 키 데이터 들어올 때 업데이트 처리
 
+Delta Lake 조회 성능
+├── 개인 최근 100건 조회
+├── 특정 서비스 접근 유저 모수 추출
+├── 캐시 히트 효과 측정          ← 데이터 변경이 많은 경우 캐시 히트율 포함
+└── Variant Data Type 쿼리 성능  ← JSON 컬럼 그대로 저장 후 조회 시 분석 성능 (기존 미지원 기능)
+
 운영 안정성
 ├── 장애 복구 방안
 ├── Small File 문제 확인        ← 스트리밍 시 작은 파일 수백만 개 생기는 문제
 ├── Optimize / Compaction 주기  ← 작은 파일 병합 주기 최적화
 └── 탈퇴자 삭제 쿼리 성능 영향도
+
+엣지 케이스
+├── Kafka lag 3시간 누적 후 재시작 (240만 건)
+│   ├── 복구 완료 1시간 이내
+│   └── Backpressure 처리 검증
+└── 피크 트래픽 지속 성능 (처리량 유지율 100%)
 ```
 
-**성공 기준:** 기존 NiFi 또는 Flink와 동등 이상
+**성공 기준:** 기존 NiFi 또는 Flink와 동등 이상 / Delta Lake 조회 성능 Trino 대비 30% 개선
+
+---
+
+### A-1-B. Kafka → Delta Lake (결제 데이터 Wide Table)
+
+> **Wide Table:** 컬럼 수가 매우 많은 테이블 (270컬럼), 컴팩션 지연 이슈가 핵심
+
+**목표:** 결제 데이터를 실시간으로 Delta Lake에 적재하고 Wide Table 환경에서의 안정성 검증
+
+**데이터 규모**
+
+```
+결제 로그
+├── 600건 / 초
+├── 10KB / 건
+├── 270개 컬럼
+└── 1개월 ≈ 225GB
+```
+
+**검증 항목**
+
+```
+처리 성능 (표준)
+├── 초당 600건 처리 (동등 이상)
+└── Wide Table 컴팩션 지연 없음 (30분 이내)
+
+운영 안정성
+├── Liquid Clustering 기준 적재 검증
+└── Predictive Optimize 자동 Compaction 처리
+```
+
+**성공 기준:** 처리량 600건/초 이상 유지 / 컴팩션 완료 30분 이내
 
 ---
 
@@ -189,8 +235,50 @@ JSON Parsing 작업        ← 비정형 JSON 컬럼 파싱 속도
 배치 파이프라인 전환
 Airflow Databricks Operator 호환성    ← 기존 Airflow DAG 재사용 가능한가
 Databricks Workflow 사용성
-Databricks Lakeflow / SDP 검토        ← Databricks 자체 파이프라인 도구
-데이터 품질 로깅 및 모니터링
+Databricks SDP (Spark Declarative Pipeline)
+├── 단일 pipeline 내 bronze/silver/gold ST·MV 정의
+├── 복수 pipeline을 UI Job + depends_on으로 운영
+└── 적재 count 등 데이터 품질 로깅 및 SLA 모니터링
+```
+
+---
+
+## 4-B. 시나리오 B-2 — 메달리온 아키텍처 / Asset Bundles
+
+> **SDP (Spark Declarative Pipeline):** Databricks Lakeflow 기반 선언형 파이프라인 (구 DLT 포함)
+> **Asset Bundles:** YAML 코드 기반 Databricks 리소스 관리 도구 (CI/CD 배포 포함)
+> **Materialized View (MV):** 쿼리 결과를 미리 계산해서 저장해두는 가상 테이블
+
+**목표:** SDP 기반 메달리온 아키텍처 운영 가능성과 Asset Bundles를 통한 코드 표준화/배포 자동화 검증
+
+### B-2-1. SDP 기반 메달리온 파이프라인
+
+```
+단일 pipeline 운영
+├── bronze/silver/gold ST·MV를 하나의 SDP pipeline으로 정의
+├── Pipelines Editor (DAG·Data Preview·Issues Panel) 사용성 확인
+└── ST vs MV 선택 기준 정립
+
+복수 pipeline 운영
+├── bronze/silver/gold 각각 별도 pipeline으로 분리
+├── Lakeflow Job UI에서 pipeline_task + depends_on으로 cross-pipeline 의존성 표현
+└── UI 운영 장단점 및 설정 변경 Audit 가능성 확인
+```
+
+### B-2-2. Asset Bundles 코드 표준화 및 배포
+
+```
+Bundle 코드 구조
+├── databricks.yml + *.pipeline.yml + *.job.yml 작성
+├── <pipeline>/<stage>/<table>.py 3단 트리 구조
+├── src/common/ 모듈 공유 (root_path: ../src)
+└── 코드 표준화·재사용성·가독성 측면 검증
+
+Bundle 배포·운영
+├── databricks bundle deploy 일괄 배포·롤백
+├── 환경별 변수 분기 (dev/staging/prd)
+├── Git 버전관리 + CI/CD 연동
+└── 사내 GitHub Enterprise 연동 가능 여부
 ```
 
 ---
@@ -535,6 +623,35 @@ S3 적재 후 Delta 포맷으로 변환
 ├── 포맷 변환 소요 시간 (Parquet → Delta)
 └── 초기 마이그레이션 파이프라인 완성 여부
 ```
+
+---
+
+## 14-B. 시나리오 L-2 — MySQL DB Ingestion (Lakeflow Connect)
+
+> **Lakeflow Connect:** Databricks 자체 커넥터 기반 데이터 수집 도구
+> **CDC + 초기 스냅샷:** 기존 데이터 전체 복제(스냅샷) 후 변경분만 지속 수집하는 방식
+
+**목표:** Lakeflow Connect MySQL Connector를 통한 MySQL 데이터 수집 파이프라인 검증
+
+**데이터 규모**
+
+```
+MySQL 인스턴스
+├── 당일 데이터
+├── 최대 트래픽 6.875 MB/s
+└── TPS ≈ 7,040 (Parquet 환산)
+```
+
+**검증 항목**
+
+```
+├── CDC 방식 실시간 변경분 수집
+├── 초기 스냅샷 전체 복제
+├── as-is 동등 이상 처리량 확인
+└── Lakeflow Connect 표준 옵션 검증
+```
+
+**전제 조건:** 카카오페이 측 5월 말까지 대상 MySQL 인스턴스·계정·테이블 정의·접근 권한 사전 공유 필요
 
 ---
 

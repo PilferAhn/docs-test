@@ -287,3 +287,62 @@ Databricks 계정
 - [ ] UC Bucket에 Bucket Policy 추가 (Databricks Account 허용)
 - [ ] External Bucket에 Bucket Policy 추가 (Databricks Account 허용)
 - [ ] SCP로 인한 차단 여부 확인
+
+---
+
+## STS (Security Token Service)
+
+### 개념
+
+**임시 자격증명을 발급해주는 AWS 서비스.**
+영구 Access Key 대신 일정 시간만 유효한 임시 키를 발급.
+
+```
+영구 자격증명 (IAM User Access Key)
+= 마스터 열쇠 (잃어버리면 큰일, 유출 시 영구 위험)
+
+STS 임시 자격증명
+= 하루짜리 방문증 (만료되면 자동 무효, 유출돼도 시간 지나면 못 씀)
+```
+
+### AssumeRole에서 STS가 하는 일
+
+Cross Account Role 설정에서 항상 등장하는 `sts:AssumeRole`이 바로 STS.
+
+```
+Databricks (계정 A)
+  │
+  │ sts:AssumeRole 요청
+  ▼
+STS 서비스
+  │
+  │ 임시 자격증명 발급 (유효시간: 최대 12시간)
+  │  - AccessKeyId    (임시)
+  │  - SecretAccessKey (임시)
+  │  - SessionToken
+  ▼
+Databricks가 임시 자격증명으로 고객사 S3 접근
+```
+
+### POC에서 STS가 필요한 이유
+
+```
+IAM Policy에 sts:AssumeRole 권한 없으면:
+  → Cross Account Role 사용 불가
+  → UC Root Role, Storage Credential Role 전부 동작 안 함
+  → S3 접근 불가
+
+SCP에서 sts:AssumeRole 차단 시:
+  → IAM에 권한 있어도 전부 막힘
+  → 고객사 클라우드 담당자에게 SCP 확인 필수
+```
+
+### STS 관련 IAM 권한 (Databricks용)
+
+```json
+{
+  "Effect": "Allow",
+  "Action": "sts:AssumeRole",
+  "Resource": "arn:aws:iam::고객사_ACCOUNT_ID:role/*"
+}
+```

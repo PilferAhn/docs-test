@@ -172,15 +172,106 @@ POC 단계
 
 ---
 
+## 누락하기 쉬운 설정
+
+### 1. VPC DNS 설정
+
+VPC 자체에 DNS 옵션 2개가 반드시 활성화되어 있어야 함.
+
+```
+VPC 설정 > Edit DNS:
+  ✅ enableDnsHostnames = true
+  ✅ enableDnsSupport   = true
+
+꺼져 있으면:
+  → Route 53 Private Hosted Zone 설정해도 DNS 동작 안 함
+  → VPC Endpoint IP 대신 공인 IP로 연결됨
+```
+
+### 2. NACL Ephemeral Port
+
+NACL은 Stateless → 응답 트래픽용 임시 포트도 열어야 함.
+
+```
+추가해야 할 규칙:
+  Inbound   1024-65535  TCP  0.0.0.0/0  ALLOW
+  Outbound  1024-65535  TCP  0.0.0.0/0  ALLOW
+```
+
+### 3. Security Group Self Outbound
+
+Self 규칙을 Inbound만 추가하고 Outbound를 빠뜨리는 경우.
+
+```
+Inbound  Self ← 보통 추가함
+Outbound Self ← 빠뜨리기 쉬움 → Spark Shuffle 안 됨
+```
+
+### 4. Metastore → Workspace 할당
+
+Metastore 만들고 Workspace에 연결하는 것 빠뜨리는 경우.
+
+```
+Databricks Account Console
+  > Metastore 선택
+  > Workspaces 탭
+  > Assign to Workspace ← 이거 빠뜨리면 UC 기능 전혀 안 됨
+```
+
+### 5. Workspace에 네트워크 설정 입력
+
+Customer Managed VPC 사용 시 Workspace 생성할 때 직접 입력해야 함.
+
+```
+Workspace 생성 시 입력 항목:
+  - VPC ID
+  - Private Subnet ID (2개)
+  - Security Group ID
+  - VPC Endpoint ID (Private Link 사용 시)
+
+빠지면 → Databricks Managed VPC로 생성됨
+```
+
+### 6. Storage Credential → External Location → Volume 순서
+
+```
+필수 순서:
+  1. Storage Credential 등록 (IAM Role ARN)
+  2. External Location 생성 (SCC + S3 URL)
+  3. Volume 생성
+  4. 접근 테스트
+
+2번 없이 3번 → Volume 생성 불가
+```
+
+---
+
 ## 체크리스트 (Customer Managed VPC 선택 시)
 
+**네트워크:**
+- [ ] VPC enableDnsHostnames = true
+- [ ] VPC enableDnsSupport = true
 - [ ] 고객사 AWS 계정 ID 확보
-- [ ] Cross-Account IAM Role 생성
-- [ ] VPC ID, Subnet ID 확인
+- [ ] VPC ID, Subnet ID (Private x2) 확인
 - [ ] NAT Gateway 존재 여부 확인
-- [ ] S3 VPC Endpoint 생성
+- [ ] S3 VPC Endpoint (Gateway) 생성
 - [ ] Databricks Private Link (Interface Endpoint) 생성
-- [ ] Route 53 Private Hosted Zone + DNS Record 설정
-- [ ] Security Group 생성 (Databricks Control Plane IP 허용)
+- [ ] Route 53 Private Hosted Zone + DNS A Record 설정
+- [ ] Security Group 생성 (Self Inbound/Outbound, 포트 6666, 8443-8451)
+- [ ] NACL Ephemeral Port (1024-65535) 인/아웃바운드 추가
 - [ ] Public Access 설정 (POC: ON, 운영: OFF)
-- [ ] SCP 정책 확인 (필요 서비스 차단 여부)
+- [ ] SCP 정책 차단 여부 확인
+
+**IAM / S3:**
+- [ ] Cross-Account IAM Role 생성 + Trust Policy
+- [ ] UC Bucket Bucket Policy (Databricks Account Principal)
+- [ ] External Bucket Bucket Policy
+- [ ] STS AssumeRole 권한 확인
+
+**Databricks:**
+- [ ] Workspace에 VPC ID / Subnet ID / SG ID 입력
+- [ ] Metastore 생성 (UC Root + Root Role)
+- [ ] Metastore → Workspace 할당
+- [ ] Storage Credential 등록
+- [ ] External Location 생성
+- [ ] Volume 생성 및 접근 테스트

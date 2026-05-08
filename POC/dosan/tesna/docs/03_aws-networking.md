@@ -290,6 +290,77 @@ Worker 노드가 Driver에게 처리 결과를 보내려 해도
 
 ---
 
+## NACL (Network Access Control List)
+
+### 정의
+
+**서브넷 레벨**의 방화벽. 서브넷으로 들어오고 나가는 트래픽 전체를 제어.
+
+```
+Security Group = EC2 인스턴스에 부착 → 인스턴스 단위 제어
+NACL          = Subnet에 적용 → 서브넷 드나드는 모든 트래픽 제어
+```
+
+### 가장 큰 특징: Stateless
+
+```
+Security Group (Stateful):
+  Inbound 443 허용 → 응답(Outbound) 자동 허용
+
+NACL (Stateless):
+  Inbound  443 허용 ← 명시 필요
+  Outbound 443 허용 ← 명시 필요 (빠뜨리면 응답 못 나감)
+```
+
+### 규칙 구조
+
+```
+Rule #  | Protocol | Port  | Source      | Allow/Deny
+--------|----------|-------|-------------|----------
+100     | TCP      | 443   | 0.0.0.0/0   | ALLOW
+200     | TCP      | 3306  | 10.0.0.0/16 | ALLOW
+*       | All      | All   | 0.0.0.0/0   | DENY  ← 기본값 (모든 미매칭 트래픽 차단)
+```
+
+- 번호 낮을수록 먼저 평가 (100 → 200 → * 순)
+- 맞는 규칙 찾으면 즉시 적용 후 중단
+- Allow/Deny 둘 다 설정 가능 (Security Group은 Allow만)
+
+### NACL을 0.0.0.0/0으로 바꾼다는 의미
+
+특정 IP로 제한된 규칙을 **모든 IP 허용으로 임시 변경**하는 것.
+주로 **트러블슈팅(문제 진단)** 목적으로 사용.
+
+```
+변경 전 (특정 IP만):     Inbound  443  52.10.0.1/32  ALLOW
+변경 후 (전체 오픈):     Inbound  443  0.0.0.0/0     ALLOW
+
+진단 방법:
+  1단계: NACL을 0.0.0.0/0으로 전체 오픈
+         → 연결되면? → NACL IP 설정이 잘못된 것
+         → 여전히 안 되면? → SG나 DNS 등 다른 문제
+
+  2단계: 원인 확인 후 다시 특정 IP로 좁혀서 설정
+```
+
+> 0.0.0.0/0은 진단 목적으로만 임시 사용. 운영 환경에서는 반드시 복구.
+
+### Ephemeral Port (자주 놓치는 부분)
+
+NACL은 Stateless라 **응답 트래픽용 임시 포트**도 명시해야 함.
+
+```
+클라이언트가 443으로 요청 시:
+  요청:  클라이언트 → 서버 443
+  응답:  서버 → 클라이언트 임시포트(1024~65535)  ← NACL에서 별도 허용 필요
+
+추가해야 할 규칙:
+  Outbound  1024-65535  TCP  0.0.0.0/0  ALLOW  ← 응답 트래픽
+  Inbound   1024-65535  TCP  0.0.0.0/0  ALLOW  ← 응답 트래픽
+```
+
+---
+
 ## Security Group vs NACL
 
 | 항목 | Security Group | NACL |
